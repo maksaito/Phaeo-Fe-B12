@@ -1,0 +1,98 @@
+---
+title: "NMDS analysis of transcriptomic data"
+author: "Maggi Brisbin"
+date: "2023-10-11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## packages
+
+```{r loadpackages, warning=FALSE, message=FALSE}
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(vegan)
+library(DESeq2)
+library(phyloseq)
+```
+
+## data
+import data and format for deseq2:
+```{r}
+exp <- read.csv("transcript_df.csv")
+row.names(exp) <- exp$orf_id
+exp <- exp[,-1]
+exp<- exp[-c(1,2),]
+
+meta <- read.csv("transcript_df_anno.csv")
+meta$X <- paste("X", meta$X, sep="")
+row.names(meta) <- meta$X
+meta <- meta[,-1]
+meta$b12 <- factor(meta$b12)
+```
+
+
+## deseq2 variance stabilization
+convert data to deseq2 experiment object:
+```{r, warning=FALSE}
+dds<- DESeqDataSetFromMatrix(countData = exp,
+                              colData = meta,
+                              design = ~ iron)
+dds
+```
+variance stabilize:
+```{r}
+vsd <- vst(dds, blind=TRUE)
+```
+
+
+
+## NMDS
+convert variance stabilization results to a dataframe and a matrix:
+```{r}
+vsd_df <- data.frame((assay(vsd)))
+vsd_mat <- data.matrix(vsd_df)
+dim(vsd_mat) #check data dimensions
+```
+`49068 contigs, 36 samples`
+
+convert data matrix to phyloseq object:
+```{r}
+VSD <- otu_table(vsd_mat, taxa_are_rows = TRUE)
+META <- sample_data(meta)
+PS <- phyloseq(VSD, META)
+```
+
+ordination of euclidean distances between samples:
+```{r}
+ord <- ordinate(PS, "NMDS", "euclidean", k=4, trymax=50)
+```
+Plot NMDS ordination results:
+```{r}
+p<-plot_ordination(PS, ord, type="samples")+theme_bw()  +  theme(text = element_text(size=14)) +  geom_hline(yintercept = 0, linetype = "dashed", color = "lightgrey") +  geom_vline(xintercept = 0, linetype = "dashed", color = "lightgrey") + theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank()) +geom_point(aes(fill=b12, shape = iron), size =3)  + scale_shape_manual(values= c(21,24,22)) +scale_fill_manual(values=c("#333ED4", "#A1D5DE", "#A0D636", "#EEDE04", "#FFA52C", "#FD0100"))  +guides(fill = guide_legend(override.aes=list(shape=21)))
+
+p
+```
+
+`ggsave("NMDS_newcolors.pdf", width = 6, height = 4)`
+
+## PERMANOVA
+perform PERMANOVA on euclidean distances between samples:
+```{r}
+set.seed(1)
+
+vdist = vegdist(t(vsd_mat), method = "euclidean")
+
+adonis2(vdist ~ iron+b12, data = meta)
+```
+## ANOSIM
+
+```{r}
+ano<- with(meta, anosim(vdist, condition))
+summary(ano)
+```
+
